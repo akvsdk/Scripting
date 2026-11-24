@@ -1,0 +1,45 @@
+name: "AGY 重置与余额（透明版）"
+description: "适配 iOS 透明/液态玻璃风格的 AGY 重置与余额小组件：追踪 Google Antigravity 重置公告（26 周热力图 + 统计 + 断网缓存降级），并支持通过自定义接口或 OAuth 展示个人余额与模型配额。"
+author: "agy-widget"
+icon: "arrow.clockwise.circle.fill"
+
+env_schema:
+  REFRESH_MINUTES:
+    name: "刷新间隔（分钟）"
+    description: "建议刷新间隔，实际调度由 iOS 系统控制（最小 5 分钟）"
+    default_value: "15"
+  AGY_BALANCE_URL:
+    name: "自定义余额接口 URL（可选）"
+    description: "填写返回余额/配额 JSON 的接口地址；留空时尝试 OAuth，若均未配置则仅展示公开重置数据"
+  AGY_BALANCE_TOKEN:
+    name: "自定义余额接口 Token（可选）"
+    description: "作为 Authorization Bearer 请求头发送给自定义余额接口"
+  AGY_ACCESS_TOKEN:
+    name: "Google OAuth Access Token（可选）"
+    description: "直接调用 Cloud Code Assist 查询模型配额（短期有效）"
+  AGY_REFRESH_TOKEN:
+    name: "Google OAuth Refresh Token（可选）"
+    description: "配合 AGY_CLIENT_ID 自动刷新 Access Token 并缓存在 Egern 本地存储"
+  AGY_CLIENT_ID:
+    name: "Google OAuth Client ID（可选）"
+    description: "使用 AGY_REFRESH_TOKEN 时必填"
+  AGY_CLIENT_SECRET:
+    name: "Google OAuth Client Secret（可选）"
+    description: "若 OAuth 客户端需要 Secret 时填写"
+  AGY_PROJECT_ID:
+    name: "Google Cloud Project ID（可选）"
+    description: "留空时自动通过 loadCodeAssist 探测"
+  AGY_API_BASE:
+    name: "Cloud Code API 地址（可选）"
+    description: "默认 https://cloudcode-pa.googleapis.com，可切换为 daily-cloudcode-pa.googleapis.com"
+    default_value: "https://cloudcode-pa.googleapis.com"
+
+scriptings:
+  - generic:
+      name: "agy-resets-balance"
+      script_url: "https://raw.githubusercontent.com/akvsdk/Scripting/main/egern/agy-widget.js"
+      timeout: 20
+
+widgets:
+  - name: "AGY 重置与余额"
+    script_name: "agy-resets-balance"
