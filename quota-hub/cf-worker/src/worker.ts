@@ -1,4 +1,10 @@
-import { AGY_KV_KEY, collectEnabledGroups, type AgySnapshot, type Env } from './providers';
+import {
+  AGY_KV_KEY,
+  collectEnabledGroups,
+  fetchEgernAgyPayload,
+  type AgySnapshot,
+  type Env,
+} from './providers';
 
 const AGY_RESETS_API = 'https://agyresets.com/api/v1';
 
@@ -152,6 +158,12 @@ export default {
     if (url.pathname === '/api/quota' && req.method === 'GET') {
       const groups = await collectEnabledGroups(env);
       return jsonResponse({ updatedAt: Date.now(), groups }, 200, cors);
+    }
+
+    // 3. Egern 小组件专用只读接口：直接输出四卡规范配额 + 精确 ISO resetTime
+    if (url.pathname === '/api/egern/agy' && req.method === 'GET') {
+      const payload = await fetchEgernAgyPayload(env);
+      return jsonResponse(payload, 200, cors);
     }
 
     return jsonResponse({ error: 'Not Found' }, 404, cors);

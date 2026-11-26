@@ -3,7 +3,7 @@
 独立拆分为三个解耦目录：
 
 - `ui-kit/`：零依赖透明风格 Web Component (`<quota-panel>`)，可单独发布或被任何网页/桌面小组件复用。
-- `cf-worker/`：独立 Cloudflare Worker 服务（`POST /api/ingest/agy`、`GET /api/quota`、托管透明 Web 端，并预留 `deepseek` / `magpie` / `workbuddy` / `emby` / `qbittorrent` 后端适配器，默认仅开启 `agy`）。
+- `cf-worker/`：独立 Cloudflare Worker 服务（`POST /api/ingest/agy`、`GET /api/quota`、`GET /api/egern/agy`、`GET /api/resets`、托管透明 Web 端，并预留 `deepseek` / `magpie` / `workbuddy` / `emby` / `qbittorrent` 后端适配器，默认仅开启 `agy`）。
 - `local-agy/`：本机 `agy` 官方 `statusLine` 脱敏异步推送脚本（额度变化最短 120 秒推一次，无变化 10 分钟心跳一次）。
 
 ## 1. 本地预览组件库

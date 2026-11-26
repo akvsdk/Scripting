@@ -209,6 +209,90 @@ const fetchAgyFromKv: WorkerProvider = async (env) => {
   };
 };
 
+export interface EgernQuotaEntry {
+  id: string;
+  label: string;
+  remainingFraction: number;
+  remainingPercent: number;
+  resetTime: string | null;
+  resetInText: string;
+}
+
+export interface EgernAgyPayload {
+  source: 'agy-snapshot';
+  updatedAt: number | null;
+  plan: string | null;
+  email: string | null;
+  model: string | null;
+  quotas: EgernQuotaEntry[];
+}
+
+const EGERN_CANONICAL_BUCKETS: ReadonlyArray<readonly [string, string]> = [
+  ['gemini-5h', 'Gemini 5H'],
+  ['3p-5h', 'Claude 5H'],
+  ['gemini-weekly', 'Gemini 周'],
+  ['3p-weekly', 'Claude 周'],
+];
+
+function toEgernEntry(id: string, label: string, bucket?: AgyQuotaBucket): EgernQuotaEntry | null {
+  if (!bucket || typeof bucket.remaining_fraction !== 'number' || !Number.isFinite(bucket.remaining_fraction)) {
+    return null;
+  }
+  const fraction = Math.max(0, Math.min(1, bucket.remaining_fraction));
+  return {
+    id,
+    label,
+    remainingFraction: Number(fraction.toFixed(4)),
+    remainingPercent: Math.round(fraction * 100),
+    resetTime: bucket.reset_time ?? null,
+    resetInText: formatReset(bucket.reset_time, bucket.reset_in_seconds),
+  };
+}
+
+// ✅ Egern 小组件专用输出：直接读取 KV 原始快照，去重保留 4 个核心桶与精确 ISO resetTime
+export async function fetchEgernAgyPayload(env: Env): Promise<EgernAgyPayload> {
+  const snap = await env.QUOTA_KV.get<AgySnapshot>(AGY_KV_KEY, 'json');
+  if (!snap) {
+    return {
+      source: 'agy-snapshot',
+      updatedAt: null,
+      plan: null,
+      email: null,
+      model: null,
+      quotas: [],
+    };
+  }
+
+  const q = snap.quota || {};
+  const quotas: EgernQuotaEntry[] = [];
+  const known = new Set<string>();
+
+  for (const [id, label] of EGERN_CANONICAL_BUCKETS) {
+    known.add(id);
+    const entry = toEgernEntry(id, label, q[id]);
+    if (entry) quotas.push(entry);
+  }
+
+  for (const [id, bucket] of Object.entries(q)) {
+    if (known.has(id)) continue;
+    const entry = toEgernEntry(id, id, bucket);
+    if (entry) quotas.push(entry);
+  }
+
+  const rawTier = (snap.planTier || '').trim();
+  const plan =
+    rawTier && rawTier.toLowerCase() !== 'unknown' ? resolveTierBadge(rawTier).text : null;
+
+  return {
+    source: 'agy-snapshot',
+    updatedAt: snap.updatedAt,
+    plan,
+    email: maskEmail(snap.email) ?? null,
+    model: snap.model ?? null,
+    quotas,
+  };
+}
+
 // ── 以下为预留 CF Worker 适配器（默认不启用，不生成额外 UI）──
 
 const fetchDeepSeek: WorkerProvider = async (env) => {
