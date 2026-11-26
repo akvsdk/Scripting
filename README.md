@@ -4,8 +4,8 @@
 
 ## Egern 小组件
 
-- **AGY 重置与余额（透明四卡版）**：[`egern/README.md`](./egern/README.md)
-  - 模块导入链接：`https://raw.githubusercontent.com/akvsdk/Scripting/main/egern/agy-widget.yaml`
+- **AGY 重置 / AGY 余额（透明双组件版）**：[`egern/README.md`](./egern/README.md)
+  - 模块导入链接：`https://raw.githubusercontent.com/akvsdk/Scripting/main/egern/agy-widget.yaml`（自动注册「AGY 重置」与「AGY 余额」两个独立小组件）
   - 脚本直链：`https://raw.githubusercontent.com/akvsdk/Scripting/main/egern/agy-widget.js`
 
 ## Quota Hub（AGY 配额面板 + CF Worker）
