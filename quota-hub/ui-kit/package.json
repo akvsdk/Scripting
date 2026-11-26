@@ -1,0 +1,23 @@
+{
+  "name": "@local/quota-panel-kit",
+  "version": "0.1.0",
+  "description": "Zero-dependency transparent glassmorphism Web Component for model quota & balance panels.",
+  "type": "module",
+  "main": "./quota-panel.js",
+  "module": "./quota-panel.js",
+  "types": "./quota-panel.d.ts",
+  "exports": {
+    ".": {
+      "types": "./quota-panel.d.ts",
+      "import": "./quota-panel.js"
+    },
+    "./agy-resets": {
+      "import": "./agy-resets-panel.js"
+    }
+  },
+  "files": [
+    "quota-panel.js",
+    "quota-panel.d.ts",
+    "agy-resets-panel.js"
+  ]
+}

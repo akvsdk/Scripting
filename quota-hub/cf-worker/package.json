@@ -1,0 +1,12 @@
+{
+  "name": "quota-hub-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-ui": "cp ../ui-kit/quota-panel.js ../ui-kit/agy-resets-panel.js ./public/",
+    "dev": "npm run sync-ui && wrangler dev",
+    "deploy": "npm run sync-ui && wrangler deploy",
+    "dry-run": "npm run sync-ui && wrangler deploy --dry-run"
+  }
+}

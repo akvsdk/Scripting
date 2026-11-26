@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGY Quota Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* 纯 GPU transform + opacity 入场动画（零动态 filter: blur，杜绝反复刷新 GPU 卡顿） */
+    @keyframes boot-aurora {
+      0% { opacity: 0.92; transform: scale(0.65) rotate(-6deg); }
+      45% { opacity: 0.58; transform: scale(1.08) rotate(3deg); }
+      100% { opacity: 0; transform: scale(1.28) rotate(8deg); }
+    }
+
+    @keyframes boot-scanline {
+      0% { opacity: 0; transform: translate3d(0, -10vh, 0); }
+      15% { opacity: 0.95; }
+      85% { opacity: 0.6; }
+      100% { opacity: 0; transform: translate3d(0, 110vh, 0); }
+    }
+
+    @keyframes boot-rise {
+      0% { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.975); }
+      100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    }
+
+    body {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+      font-family: 'Space Grotesk', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #f8fafc;
+      /* 静态多层极光星云：为水晶玻璃提供高透折射背景且 0 GPU 重绘开销 */
+      background-color: #030712;
+      background-image:
+        radial-gradient(circle at 14% 12%, rgba(29, 111, 251, 0.34), transparent 42%),
+        radial-gradient(circle at 86% 86%, rgba(6, 182, 212, 0.28), transparent 44%),
+        radial-gradient(circle at 72% 34%, rgba(168, 85, 247, 0.24), transparent 40%),
+        linear-gradient(rgba(56, 189, 248, 0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 189, 248, 0.055) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+      overflow-x: hidden;
+    }
+
+    .boot-aurora {
+      position: fixed;
+      inset: -12%;
+      z-index: 20;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 38% 42%, rgba(56, 189, 248, 0.45), transparent 44%),
+        radial-gradient(circle at 64% 52%, rgba(168, 85, 247, 0.42), transparent 46%),
+        radial-gradient(circle at 50% 62%, rgba(16, 185, 129, 0.28), transparent 50%);
+      animation: boot-aurora 1.05s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    .boot-scanline {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 2px;
+      z-index: 21;
+      pointer-events: none;
+      background: linear-gradient(90deg, transparent 0%, #38bdf8 22%, #c084fc 50%, #34d399 78%, transparent 100%);
+      box-shadow: 0 0 18px 3px rgba(56, 189, 248, 0.5);
+      animation: boot-scanline 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 840px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .reveal { animation: boot-rise 0.65s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+    .reveal-1 { animation-delay: 80ms; }
+    .reveal-2 { animation-delay: 180ms; }
+    .reveal-3 { animation-delay: 280ms; }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 4px;
+      font-family: 'JetBrains Mono', 'Noto Sans SC', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: rgba(203, 213, 225, 0.85);
+    }
+
+    .section-num { color: #74e1ff; }
+
+    .section-line {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(116, 225, 255, 0.36), rgba(168, 85, 247, 0.16), transparent);
+    }
+
+    .section-tag {
+      font-size: 9.5px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(125, 211, 252, 0.24);
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(226, 232, 240, 0.78);
+    }
+
+    .footer-hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      color: rgba(148, 163, 184, 0.68);
+    }
+  </style>
+</head>
+<body>
+  <div class="boot-aurora" aria-hidden="true"></div>
+  <div class="boot-scanline" aria-hidden="true"></div>
+
+  <main class="wrap">
+    <!-- 第一栏：顶部信息（AGY 重置公告 & 26 周热力图） -->
+    <section class="section reveal reveal-1" aria-label="信息">
+      <div class="section-head">
+        <span class="section-num">01</span>
+        <span>信息 · 重置公告</span>
+        <span class="section-line"></span>
+        <span class="section-tag">AGYRESETS</span>
+      </div>
+      <agy-resets-panel id="resetsPanel" variant="crystal"></agy-resets-panel>
+    </section>
+
+    <!-- 第二栏：AGY 账号信息 -->
+    <section class="section reveal reveal-2" aria-label="AGY 账号信息">
+      <div class="section-head">
+        <span class="section-num">02</span>
+        <span>AGY 账号信息</span>
+        <span class="section-line"></span>
+        <span class="section-tag">AGY STATUSLINE</span>
+      </div>
+      <quota-panel id="agyPanel" variant="crystal"></quota-panel>
+    </section>
+
+    <footer class="footer-hud reveal reveal-3">
+      <span id="statusText">SYS::SYNCING...</span>
+      <span>CRYSTAL HUD · AGY-RESETS + AGY-ACCOUNT</span>
+    </footer>
+  </main>
+
+  <script type="module">
+    import './agy-resets-panel.js?v=7';
+    import './quota-panel.js?v=7';
+
+    // 入场动画结束后立即清理光幕节点，释放合成层显存
+    setTimeout(() => {
+      document.querySelectorAll('.boot-aurora, .boot-scanline').forEach((el) => el.remove());
+    }, 1250);
+
+    const resetsPanel = document.getElementById('resetsPanel');
+    const agyPanel = document.getElementById('agyPanel');
+    const statusText = document.getElementById('statusText');
+
+    async function loadResets() {
+      const res = await fetch('/api/resets');
+      if (!res.ok) throw new Error(`resets HTTP ${res.status}`);
+      resetsPanel.data = await res.json();
+    }
+
+    async function loadAgyAccount() {
+      const res = await fetch('/api/quota');
+      if (!res.ok) throw new Error(`quota HTTP ${res.status}`);
+      const data = await res.json();
+      const agy = (data.groups || []).find((g) => g.id === 'agy');
+      if (agy) {
+        agyPanel.data = agy;
+      } else {
+        agyPanel.data = { id: 'agy', title: '当前账号', badges: [{ text: 'STANDBY', tone: 'default' }], items: [] };
+      }
+    }
+
+    async function syncAll() {
+      const results = await Promise.allSettled([loadResets(), loadAgyAccount()]);
+      const failed = results.filter((r) => r.status === 'rejected');
+      if (failed.length === 0) {
+        statusText.textContent = `SYNC::OK @ ${new Date().toLocaleTimeString()}`;
+      } else {
+        statusText.textContent = `SYNC::PARTIAL (${failed.map((f) => f.reason?.message).join(', ')})`;
+      }
+    }
+
+    syncAll();
+    setInterval(syncAll, 60000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+name = "quota-hub"
+main = "src/worker.ts"
+compatibility_date = "2026-01-01"
+
+[vars]
+# 当前仅开启 agy 展示；后续按需追加，例如 "agy,deepseek"
+ENABLED_PROVIDERS = "agy"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "QUOTA_KV"
+id = "367c2154ef4f44d3b1d236e0a27f69c8"
