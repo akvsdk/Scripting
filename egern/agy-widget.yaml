@@ -9,11 +9,11 @@ env_schema:
     description: "建议刷新间隔，实际调度由 iOS 系统控制（最小 5 分钟）"
     default_value: "15"
   AGY_BALANCE_URL:
-    name: "自定义余额接口 URL（可选）"
-    description: "填写返回余额/配额 JSON 的接口地址；留空时尝试 OAuth，若均未配置则仅展示公开重置数据"
+    name: "Quota Hub 或自定义余额接口 URL（可选）"
+    description: "可直接填 Quota Hub Worker 根地址（自动优先请求 /api/egern/agy 并回退 /api/quota，同时复用 /api/resets）或完整接口地址；留空时尝试 OAuth，若均未配置则仅展示公开重置数据"
   AGY_BALANCE_TOKEN:
-    name: "自定义余额接口 Token（可选）"
-    description: "作为 Authorization Bearer 请求头发送给自定义余额接口"
+    name: "自定义接口 Token（可选）"
+    description: "作为 Authorization Bearer 请求头发送给自定义接口（Quota Hub 默认公开只读可留空）"
   AGY_ACCESS_TOKEN:
     name: "Google OAuth Access Token（可选）"
     description: "直接调用 Cloud Code Assist 查询模型配额（短期有效）"

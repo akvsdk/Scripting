@@ -1,15 +1,16 @@
 /**
  * ==========================================
  * AGY 重置与余额小组件（透明四卡版）
- * - 样式与布局对齐 实时油价.js（IBL3ND 透明风格）：
- *   · 根背景 { light: '#FFFFFF', dark: '#000000' }，无 backgroundGradient
+ * - 样式与布局：
+ *   · 根背景全透明 #00000000（无 backgroundGradient），内层四卡采用 rgba 半透明玻璃底 + 0.5pt 细描边
+ *   · 同时适配普通桌面与 iOS 26 透明/液态玻璃桌面
  *   · 小号 (Small)  ：2x2 四宫格卡片，紧凑留白
  *   · 中号 (Medium) ：1x4 横排卡片 + 顶栏最近重置 + 底栏统计与刷新时间
  *   · 大号 (Large)  ：2x2 放大四宫格 + 内嵌 SVG 走势图/热力图/配额条
  *   · 锁屏 (Lock)   ：支持 accessoryInline / accessoryCircular / accessoryRectangular
  * - 数据来源：
- *   · 公开重置：https://agyresets.com/api/v1/status & /resets（免配置）
- *   · 个人余额：支持自定义 AGY_BALANCE_URL 或 Google OAuth（通过 ctx.env 配置）
+ *   · 公开重置：优先复用 Quota Hub /api/resets，自动回退 https://agyresets.com/api/v1
+ *   · 个人配额：优先请求 Quota Hub /api/egern/agy（回退 /api/quota），并兼容自定义 JSON 或 Google OAuth
  *   · 本地缓存：ctx.storage 持久化快照，断网或接口异常自动降级
  * ==========================================
  */
@@ -35,19 +36,19 @@ const DAY_IN_MS = 86400000;
 const HEATMAP_WEEKS = 14;
 const PACIFIC_TIME_ZONE = 'America/Los_Angeles';
 
-// 透明版根背景与色板（对齐 实时油价.js / IBL3ND）
-const ROOT_BG = { light: '#FFFFFF', dark: '#000000' };
+// 全模式透明玻璃色板（根背景全透明，内层卡片采用 rgba 半透明底 + 0.5pt 玻璃细描边）
+const ROOT_BG = '#00000000';
 const C = {
-  card: { light: '#F5F5F7', dark: '#2C2C2E' },
-  cardBorder: { light: '#E0E0E0', dark: '#3A3A3C' },
+  card: { light: 'rgba(255, 255, 255, 0.28)', dark: 'rgba(255, 255, 255, 0.09)' },
+  cardBorder: { light: 'rgba(0, 0, 0, 0.09)', dark: 'rgba(255, 255, 255, 0.16)' },
   main: { light: '#1C1C1E', dark: '#F2F2F7' },
-  muted: { light: '#8E8E93', dark: '#636366' },
+  muted: { light: '#6E6E73', dark: '#98989F' },
   gold: { light: '#B07C1A', dark: '#D4A02A' },
   accent: { light: '#FF9F0A', dark: '#FFB347' },
   red: { light: '#C0392B', dark: '#FF453A' },
   teal: { light: '#1E7E44', dark: '#30D158' },
   blue: { light: '#2C5F8A', dark: '#5E9ED6' },
-  divider: { light: '#E5E5EA', dark: '#38383A' },
+  divider: { light: 'rgba(0, 0, 0, 0.10)', dark: 'rgba(255, 255, 255, 0.14)' },
 };
 
 const HEX = {
@@ -134,11 +135,65 @@ function formatCountdown(isoTime, now = Date.now()) {
   return `${hours}h${mins}m后`;
 }
 
+function formatResetSub(quota) {
+  if (!quota) return '剩余配额';
+  const fromIso = formatCountdown(quota.resetTime);
+  if (fromIso) return fromIso;
+  const raw = (quota.resetText || '').trim();
+  if (!raw) return '剩余配额';
+  if (/已重置|已刷新|后$/.test(raw)) return raw;
+  return `${raw.replace(/\s+/g, '')}后`;
+}
+
 function clampFraction(value) {
+  if (value === null || value === undefined || value === '') return null;
   const num = Number(value);
   if (!Number.isFinite(num)) return null;
   if (num > 1 && num <= 100) return Math.max(0, Math.min(1, num / 100));
   return Math.max(0, Math.min(1, num));
+}
+
+function clampPercent(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.max(0, Math.min(1, num / 100));
+}
+
+function pickLowestQuota(quotas) {
+  if (!Array.isArray(quotas) || quotas.length === 0) return null;
+  return quotas.reduce(
+    (min, q) => (q.remainingFraction < min.remainingFraction ? q : min),
+    quotas[0]
+  );
+}
+
+function parseEndpointConfig(rawUrl) {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(https?:\/\/[^/?#]+)([^?#]*)(\?[^#]*)?/i);
+  if (!match) {
+    return { quotaUrls: [trimmed], resetsUrl: null, webUrl: WEBSITE_URL };
+  }
+  const origin = match[1];
+  const pathname = match[2] || '';
+  const query = match[3] || '';
+  if (pathname === '' || pathname === '/') {
+    return {
+      quotaUrls: [`${origin}/api/egern/agy${query}`, `${origin}/api/quota${query}`, trimmed],
+      resetsUrl: `${origin}/api/resets`,
+      webUrl: origin,
+    };
+  }
+  if (/\/api\/(?:egern\/agy|quota)\/?$/i.test(pathname)) {
+    const base = `${origin}${pathname.replace(/\/api\/(?:egern\/agy|quota)\/?$/i, '')}`;
+    return {
+      quotaUrls: [trimmed],
+      resetsUrl: `${base}/api/resets`,
+      webUrl: base || origin,
+    };
+  }
+  return { quotaUrls: [trimmed], resetsUrl: null, webUrl: WEBSITE_URL };
 }
 
 function formatBalanceAmount(amount, currency, unit) {
@@ -289,36 +344,60 @@ async function fetchAllResets(ctx) {
   return records;
 }
 
-async function fetchResetsDashboard(ctx, needHistory) {
+function normalizeResetsDashboard(latest, stats, history, extras = {}) {
+  const safeStats = stats || {};
+  const safeHistory = Array.isArray(history) ? history : [];
+  if (!latest) throw new Error('缺少最新重置记录');
+
+  const intervals = computeIntervals(safeHistory);
+  const longestFallback = intervals.length ? Math.max(...intervals) : 0;
+  const daysSinceLast =
+    safeStats.days_since_last != null
+      ? Number(safeStats.days_since_last)
+      : Math.max(0, (Date.now() - Date.parse(latest.announced_at)) / DAY_IN_MS);
+
+  return {
+    latest,
+    scheduledReset: extras.scheduledReset || null,
+    activeWatch: extras.activeWatch || null,
+    total: Number(safeStats.total || 0),
+    daysSinceLast,
+    averageDays: Number(safeStats.avg_interval_days ?? 0),
+    medianDays: safeStats.median_interval_days != null ? Number(safeStats.median_interval_days) : null,
+    longestDays: safeStats.longest_gap_days != null ? Number(safeStats.longest_gap_days) : longestFallback,
+    intervals,
+    history: safeHistory,
+  };
+}
+
+async function fetchResetsDashboard(ctx, needHistory, resetsUrl = null) {
+  if (resetsUrl) {
+    try {
+      const payload = await httpJson(ctx, 'get', resetsUrl, { headers: { Accept: 'application/json' } });
+      const latest = payload && (payload.latest || (payload.data && payload.data.latest_reset));
+      const stats = payload && (payload.stats || (payload.data && payload.data.stats));
+      const history = payload && Array.isArray(payload.history) ? payload.history : [];
+      if (latest) {
+        return normalizeResetsDashboard(latest, stats, history, {
+          scheduledReset: payload.scheduled_reset || (payload.data && payload.data.scheduled_reset) || null,
+          activeWatch: payload.active_watch || (payload.data && payload.data.active_watch) || null,
+        });
+      }
+    } catch (_) {
+      // 优先走 Quota Hub /api/resets 边缘缓存，失败时自动回退直连 agyresets.com
+    }
+  }
+
   const [response, history] = await Promise.all([
     httpJson(ctx, 'get', `${RESETS_API_BASE}/status`, { headers: { Accept: 'application/json' } }),
     needHistory ? fetchAllResets(ctx) : Promise.resolve([]),
   ]);
 
   const data = response && response.data ? response.data : {};
-  const latest = data.latest_reset;
-  const stats = data.stats || {};
-  if (!latest) throw new Error('缺少最新重置记录');
-
-  const intervals = computeIntervals(history);
-  const longestFallback = intervals.length ? Math.max(...intervals) : 0;
-  const daysSinceLast =
-    stats.days_since_last != null
-      ? Number(stats.days_since_last)
-      : Math.max(0, (Date.now() - Date.parse(latest.announced_at)) / DAY_IN_MS);
-
-  return {
-    latest,
+  return normalizeResetsDashboard(data.latest_reset, data.stats, history, {
     scheduledReset: data.scheduled_reset || null,
     activeWatch: data.active_watch || null,
-    total: Number(stats.total || 0),
-    daysSinceLast,
-    averageDays: Number(stats.avg_interval_days ?? 0),
-    medianDays: stats.median_interval_days != null ? Number(stats.median_interval_days) : null,
-    longestDays: stats.longest_gap_days != null ? Number(stats.longest_gap_days) : longestFallback,
-    intervals,
-    history,
-  };
+  });
 }
 
 function buildFormBody(params) {
@@ -379,14 +458,91 @@ function shortModelLabel(id, displayName) {
   return raw.replace(/^Google\s+/i, '').replace(/\s+Preview$/i, '').slice(0, 14);
 }
 
-function normalizeQuotaEntry(label, rawFraction, resetTime) {
-  const fraction = clampFraction(rawFraction);
+function normalizeQuotaEntry(label, rawValue, resetTime, opts = {}) {
+  const fraction = opts.isPercent ? clampPercent(rawValue) : clampFraction(rawValue);
   if (fraction === null) return null;
   return {
     label: String(label || '配额').slice(0, 14),
     remainingFraction: fraction,
     resetTime: resetTime || null,
+    resetText: opts.resetText || null,
   };
+}
+
+const QUOTA_HUB_LABELS = {
+  'gemini-5h': 'Gemini 5H',
+  '3p-5h': 'Claude 5H',
+  'gemini-weekly': 'Gemini 周',
+  '3p-weekly': 'Claude 周',
+  'gemini-argon-neon-5h': 'Argon 5H',
+  'gemini-argon-neon-weekly': 'Argon 周',
+};
+
+function shortQuotaHubItemLabel(item) {
+  const id = String(item.id || '').trim();
+  if (id && QUOTA_HUB_LABELS[id]) return QUOTA_HUB_LABELS[id];
+  const base = String(item.label || id || '配额').trim();
+  const tag = String(item.windowTag || '').trim();
+  if (tag && !base.toLowerCase().includes(tag.toLowerCase()) && base.length + tag.length + 1 <= 14) {
+    return `${base} ${tag}`;
+  }
+  return base.slice(0, 14);
+}
+
+function extractQuotaHubPlan(group) {
+  if (!group || !Array.isArray(group.badges)) return null;
+  for (const badge of group.badges) {
+    if (!badge || typeof badge.text !== 'string') continue;
+    const text = badge.text.trim();
+    if (!text || text.startsWith('$') || /^(standby|reserved|agy|unknown)$/i.test(text)) continue;
+    if (badge.icon && ['ultra', 'enterprise', 'pro', 'free'].includes(String(badge.icon).toLowerCase())) {
+      return text;
+    }
+    if (/^(ultra|enterprise|pro|free)$/i.test(text)) return text;
+  }
+  return null;
+}
+
+function isQuotaHubPayload(src) {
+  if (!src || !Array.isArray(src.groups)) return false;
+  if (src.groups.some((g) => g && Array.isArray(g.items))) return true;
+  return src.groups.length === 0 && typeof src.updatedAt === 'number';
+}
+
+function extractQuotaHubGroups(groups) {
+  const ordered = [
+    ...groups.filter((g) => g && g.id === 'agy'),
+    ...groups.filter((g) => g && g.id !== 'agy'),
+  ];
+  const quotas = [];
+  let primaryGroup = null;
+
+  for (const group of ordered) {
+    if (!Array.isArray(group.items) || group.items.length === 0) continue;
+    if (!primaryGroup) primaryGroup = group;
+
+    const idSet = new Set(group.items.map((it) => it && it.id).filter(Boolean));
+    for (const item of group.items) {
+      if (!item || typeof item !== 'object') continue;
+      // providers.ts 将 gemini-5h / gemini-weekly 镜像展开为 Argon/Neon 栏，小组件四卡去重展示
+      if (item.id === 'gemini-argon-neon-5h' && idSet.has('gemini-5h')) continue;
+      if (item.id === 'gemini-argon-neon-weekly' && idSet.has('gemini-weekly')) continue;
+
+      const hasPct = item.remainingPercent !== undefined && item.remainingPercent !== null;
+      const rawVal = hasPct
+        ? item.remainingPercent
+        : item.remainingFraction ?? item.remaining_fraction ?? item.remaining;
+      const entry = normalizeQuotaEntry(
+        shortQuotaHubItemLabel(item),
+        rawVal,
+        item.resetTime || item.reset_time || item.resetAt,
+        { isPercent: hasPct, resetText: item.resetInText || item.reset_in_text || null }
+      );
+      if (entry) quotas.push(entry);
+    }
+  }
+
+  return { quotas, primaryGroup: primaryGroup || ordered[0] || null };
 }
 
 function bucketLabel(groupName, bucket, singleBucket) {
@@ -403,15 +559,29 @@ function bucketLabel(groupName, bucket, singleBucket) {
 }
 
 function extractQuotasFromPayload(payload) {
+  if (isQuotaHubPayload(payload)) {
+    return extractQuotaHubGroups(payload.groups);
+  }
+
   const quotas = [];
 
   if (Array.isArray(payload.quotas)) {
     for (const item of payload.quotas) {
-      const frac = item.remainingFraction ?? item.remaining_fraction ?? item.remaining ?? item.percent;
+      const hasFrac =
+        item.remainingFraction !== undefined && item.remainingFraction !== null
+          ? true
+          : item.remaining_fraction !== undefined && item.remaining_fraction !== null
+            ? true
+            : item.remaining !== undefined && item.remaining !== null;
+      const isPercent = !hasFrac && (item.remainingPercent != null || item.percent != null);
+      const rawVal = hasFrac
+        ? item.remainingFraction ?? item.remaining_fraction ?? item.remaining
+        : item.remainingPercent ?? item.percent;
       const entry = normalizeQuotaEntry(
         item.label || item.name || item.model,
-        frac,
-        item.resetTime || item.reset_time || item.resetAt
+        rawVal,
+        item.resetTime || item.reset_time || item.resetAt,
+        { isPercent, resetText: item.resetInText || item.reset_in_text || null }
       );
       if (entry) quotas.push(entry);
     }
@@ -451,13 +621,16 @@ function extractQuotasFromPayload(payload) {
     }
   }
 
-  quotas.sort((a, b) => a.remainingFraction - b.remainingFraction);
-  return quotas;
+  if (payload.source !== 'agy-snapshot') {
+    quotas.sort((a, b) => a.remainingFraction - b.remainingFraction);
+  }
+  return { quotas, primaryGroup: null };
 }
 
 function normalizeBalancePayload(payload, tierInfo = null) {
   const src = payload && typeof payload === 'object' ? payload : {};
-  const quotas = extractQuotasFromPayload(src);
+  const isSnapshot = isQuotaHubPayload(src) || src.source === 'agy-snapshot';
+  const { quotas, primaryGroup } = extractQuotasFromPayload(src);
 
   const rawBalance =
     src.balance ??
@@ -477,21 +650,38 @@ function normalizeBalancePayload(payload, tierInfo = null) {
   const plan =
     src.plan ||
     src.tier ||
+    extractQuotaHubPlan(primaryGroup) ||
     (tierInfo && ((tierInfo.paidTier && tierInfo.paidTier.name) || (tierInfo.currentTier && tierInfo.currentTier.name))) ||
     null;
 
-  if (!balanceText && quotas.length === 0) throw new Error('无有效余额字段');
+  if (!balanceText && quotas.length === 0) {
+    throw new Error(isSnapshot ? '暂无配额快照' : '无有效余额字段');
+  }
 
-  return { plan: plan ? String(plan) : null, balanceText, quotas };
+  return {
+    plan: plan ? String(plan) : null,
+    balanceText,
+    quotas,
+    updatedAt: (primaryGroup && primaryGroup.updatedAt) || src.updatedAt || null,
+  };
 }
 
-async function fetchBalanceSummary(ctx, env) {
-  const customUrl = (env.AGY_BALANCE_URL || '').trim();
-  if (customUrl) {
+async function fetchBalanceSummary(ctx, env, endpointConfig = null) {
+  const ep = endpointConfig || parseEndpointConfig(env.AGY_BALANCE_URL || env.QUOTA_HUB_URL || '');
+  if (ep) {
     const headers = { Accept: 'application/json' };
     const token = (env.AGY_BALANCE_TOKEN || '').trim();
     if (token) headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-    return normalizeBalancePayload(await httpJson(ctx, 'get', customUrl, { headers }));
+    let lastErr = null;
+    for (const url of ep.quotaUrls || []) {
+      try {
+        return normalizeBalancePayload(await httpJson(ctx, 'get', url, { headers }));
+      } catch (err) {
+        if (err && err.message === '暂无配额快照') throw err;
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('余额接口不可用');
   }
 
   const accessToken = await resolveAccessToken(ctx, env);
@@ -599,6 +789,7 @@ function buildCardItems(dashboard, balance, balanceError) {
 
   if (balance) {
     const cards = [];
+    const lowestQ = pickLowestQuota(balance.quotas);
     if (balance.balanceText) {
       cards.push({
         label: '账户余额',
@@ -607,16 +798,16 @@ function buildCardItems(dashboard, balance, balanceError) {
         subColor: C.gold,
         color: C.gold,
         hex: HEX.gold,
-        graphic: balance.quotas[0] ? { kind: 'gauge', fraction: balance.quotas[0].remainingFraction } : null,
+        graphic: lowestQ ? { kind: 'gauge', fraction: lowestQ.remainingFraction } : null,
       });
     }
-    const maxQuotaCards = balance.balanceText ? 2 : 3;
+    const maxQuotaCards = balance.balanceText ? 2 : 4;
     for (const q of balance.quotas.slice(0, maxQuotaCards)) {
       const tone = quotaTone(q.remainingFraction);
       cards.push({
         label: q.label,
         val: `${Math.round(q.remainingFraction * 100)}%`,
-        sub: formatCountdown(q.resetTime) || '剩余配额',
+        sub: formatResetSub(q),
         subColor: tone.color,
         color: tone.color,
         hex: tone.hex,
@@ -730,9 +921,10 @@ function buildInfoCard(item, config) {
   };
 }
 
-function renderLockScreen(family, { dashboard, balance, refreshAfter }) {
+function renderLockScreen(family, { dashboard, balance, refreshAfter, widgetUrl }) {
   const rel = formatRelativeTime(dashboard.latest.announced_at);
-  const topQ = balance && balance.quotas[0];
+  const targetUrl = widgetUrl || WEBSITE_URL;
+  const topQ = pickLowestQuota(balance && balance.quotas);
   const quotaShort = topQ
     ? `${Math.round(topQ.remainingFraction * 100)}%`
     : balance && balance.balanceText
@@ -742,7 +934,7 @@ function renderLockScreen(family, { dashboard, balance, refreshAfter }) {
   if (family === 'accessoryInline') {
     return {
       type: 'widget',
-      url: WEBSITE_URL,
+      url: targetUrl,
       refreshAfter,
       children: [mkText(quotaShort ? `AGY ${rel} · 余 ${quotaShort}` : `AGY 重置 ${rel}`, 'body', 'semibold', C.main, { maxLines: 1 })],
     };
@@ -750,7 +942,7 @@ function renderLockScreen(family, { dashboard, balance, refreshAfter }) {
   if (family === 'accessoryCircular') {
     return {
       type: 'widget',
-      url: WEBSITE_URL,
+      url: targetUrl,
       refreshAfter,
       padding: 4,
       gap: 1,
@@ -760,20 +952,19 @@ function renderLockScreen(family, { dashboard, balance, refreshAfter }) {
       ],
     };
   }
+  const rectSub = topQ
+    ? `${topQ.label} ${quotaShort}`
+    : balance && balance.balanceText
+      ? `余 ${balance.balanceText}`
+      : `累计 ${dashboard.total}次 · 均 ${dashboard.averageDays.toFixed(1)}天`;
   return {
     type: 'widget',
-    url: WEBSITE_URL,
+    url: targetUrl,
     refreshAfter,
     gap: 2,
     children: [
       mkText(`AGY 重置 · ${rel}`, 'headline', 'bold', C.main, { maxLines: 1, minScale: 0.75 }),
-      mkText(
-        quotaShort ? `余 ${balance.balanceText || topQ.label} ${quotaShort}` : `累计 ${dashboard.total}次 · 均 ${dashboard.averageDays.toFixed(1)}天`,
-        'caption1',
-        'medium',
-        C.muted,
-        { maxLines: 1, minScale: 0.75 }
-      ),
+      mkText(rectSub, 'caption1', 'medium', C.muted, { maxLines: 1, minScale: 0.75 }),
     ],
   };
 }
@@ -794,8 +985,10 @@ export default async function (ctx) {
   const refreshAfter = new Date(Date.now() + refreshMinutes * 60 * 1000).toISOString();
   const updateTimeStr = formatStamp(new Date());
 
+  const endpointConfig = parseEndpointConfig(env.AGY_BALANCE_URL || env.QUOTA_HUB_URL || '');
+  const widgetUrl = (endpointConfig && endpointConfig.webUrl) || WEBSITE_URL;
   const hasBalanceConfig = Boolean(
-    (env.AGY_BALANCE_URL || '').trim() ||
+    endpointConfig ||
       (env.AGY_ACCESS_TOKEN || '').trim() ||
       (env.AGY_REFRESH_TOKEN || '').trim()
   );
@@ -803,8 +996,8 @@ export default async function (ctx) {
   const cached = readStorageJSON(ctx, SNAPSHOT_CACHE_KEY);
 
   const [resetsResult, balanceResult] = await Promise.allSettled([
-    fetchResetsDashboard(ctx, needHistory),
-    hasBalanceConfig ? fetchBalanceSummary(ctx, env) : Promise.resolve(null),
+    fetchResetsDashboard(ctx, needHistory, endpointConfig && endpointConfig.resetsUrl),
+    hasBalanceConfig ? fetchBalanceSummary(ctx, env, endpointConfig) : Promise.resolve(null),
   ]);
 
   let dashboard = null;
@@ -820,7 +1013,7 @@ export default async function (ctx) {
     const errMsg = resetsResult.reason instanceof Error ? resetsResult.reason.message : String(resetsResult.reason);
     return {
       type: 'widget',
-      url: WEBSITE_URL,
+      url: widgetUrl,
       refreshAfter,
       padding: 16,
       backgroundColor: ROOT_BG,
@@ -851,7 +1044,7 @@ export default async function (ctx) {
   });
 
   if (isLock) {
-    return renderLockScreen(familyRaw, { dashboard, balance, refreshAfter });
+    return renderLockScreen(familyRaw, { dashboard, balance, refreshAfter, widgetUrl });
   }
 
   const cards = buildCardItems(dashboard, balance, balanceError);
@@ -861,9 +1054,15 @@ export default async function (ctx) {
   const isUrgent = Boolean(dashboard.scheduledReset || dashboard.daysSinceLast >= dashboard.averageDays);
   const infoColor = isUrgent ? C.red : C.gold;
 
-  const widgetTitle = balance ? 'AGY 余额' : 'AGY 重置';
+  const widgetTitle = balance
+    ? balance.plan && (!isSmall || balance.plan.length <= 6)
+      ? `AGY ${balance.plan}`
+      : balance.balanceText
+        ? 'AGY 余额'
+        : 'AGY 配额'
+    : 'AGY 重置';
   const footerLabel = balance ? '配额状态: ' : '重置节奏: ';
-  const lowestQuota = balance && balance.quotas[0];
+  const lowestQuota = pickLowestQuota(balance && balance.quotas);
   const footerInfo = lowestQuota
     ? `${lowestQuota.label} ${Math.round(lowestQuota.remainingFraction * 100)}%`
     : `均 ${dashboard.averageDays.toFixed(1)}天 · 最长 ${dashboard.longestDays.toFixed(0)}天`;
@@ -883,7 +1082,7 @@ export default async function (ctx) {
     };
     return {
       type: 'widget',
-      url: WEBSITE_URL,
+      url: widgetUrl,
       refreshAfter,
       padding: [12, 12, 8, 12],
       backgroundColor: ROOT_BG,
@@ -892,7 +1091,7 @@ export default async function (ctx) {
           [
             mkIcon('arrow.clockwise.circle.fill', C.accent, 13),
             mkSpacer(4),
-            mkText(widgetTitle, 13, 'heavy', C.main, { maxLines: 1 }),
+            mkText(widgetTitle, 13, 'heavy', C.main, { maxLines: 1, minScale: 0.75 }),
             mkSpacer(),
             mkIcon('arrow.triangle.2.circlepath', C.muted, 9),
             mkSpacer(2),
@@ -943,7 +1142,7 @@ export default async function (ctx) {
     };
     return {
       type: 'widget',
-      url: WEBSITE_URL,
+      url: widgetUrl,
       refreshAfter,
       padding: [16, 16, 14, 16],
       backgroundColor: ROOT_BG,
@@ -952,7 +1151,7 @@ export default async function (ctx) {
           [
             mkIcon('arrow.clockwise.circle.fill', C.accent, 17),
             mkSpacer(4),
-            mkText(widgetTitle, 16, 'heavy', C.main, { maxLines: 1 }),
+            mkText(widgetTitle, 16, 'heavy', C.main, { maxLines: 1, minScale: 0.75 }),
             mkSpacer(),
             mkText('最近重置: ', 12, 'medium', infoColor),
             mkText(resetDateStr, 12, 'bold', infoColor),
@@ -1006,7 +1205,7 @@ export default async function (ctx) {
   };
   return {
     type: 'widget',
-    url: WEBSITE_URL,
+    url: widgetUrl,
     refreshAfter,
     padding: [10, 12, 6, 12],
     backgroundColor: ROOT_BG,
@@ -1015,7 +1214,7 @@ export default async function (ctx) {
         [
           mkIcon('arrow.clockwise.circle.fill', C.accent, 16),
           mkSpacer(2),
-          mkText(widgetTitle, 15, 'heavy', C.main, { maxLines: 1 }),
+          mkText(widgetTitle, 15, 'heavy', C.main, { maxLines: 1, minScale: 0.75 }),
           mkSpacer(),
           mkText('最近重置: ', 11, 'medium', infoColor),
           mkText(resetDateStr, 11, 'bold', infoColor),
