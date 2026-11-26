@@ -45,14 +45,7 @@
 
 ## 安装方式
 
-### 方式一：本地脚本（最简）
-
-1. 在 Egern 中进入 **工具 → 脚本 → +**，新建 `generic` 脚本，名称填 `agy-resets-balance`，粘贴 `agy-widget.js` 内容并保存。
-2. 进入 **分析 → 左上角小组件画廊 → +**，新建小组件并关联 `agy-resets-balance`。
-3. 如需余额/配额展示，在对应小组件或模块的 `Env` 中填入上述环境变量。
-4. 在 iOS 主屏幕添加 **Egern** 小组件并选择该名称。
-
-### 方式二：模块导入（推荐）
+### 方式一：模块导入（推荐，自动注册两个独立小组件）
 
 在 Egern **工具 → 模块 → +** 中直接填入模块链接：
 
@@ -60,7 +53,15 @@
 https://raw.githubusercontent.com/akvsdk/Scripting/main/egern/agy-widget.yaml
 ```
 
-启用后小组件会自动出现在 **分析 → 小组件画廊** 中，并可在模块设置页通过 `env_schema` 表单直接填写环境变量。
+启用后会在 **分析 → 小组件画廊** 中同时出现两个独立小组件，可在主屏幕分别添加或同时摆放：
+- **AGY 重置**（`WIDGET_MODE=resets`）：专注展示重置统计、间隔走势与迷你热力图，开箱即用。
+- **AGY 余额**（`WIDGET_MODE=balance`）：专注展示个人配额四卡（`Gemini 5H` / `Claude 5H` / `Gemini 周` / `Claude 周`）与快照同步状态；在模块设置页的 `Env` 中填写 `AGY_BALANCE_URL`（或 OAuth 凭证）即可生效。
+
+### 方式二：本地脚本
+
+1. 在 Egern 中进入 **工具 → 脚本 → +**，新建 `generic` 脚本，名称填 `agy-resets-balance`，粘贴 `agy-widget.js` 内容并保存。
+2. 进入 **分析 → 左上角小组件画廊 → +**，分别新建小组件 **AGY 重置**（`Env` 加 `WIDGET_MODE=resets`）和 **AGY 余额**（`Env` 加 `WIDGET_MODE=balance` 及 `AGY_BALANCE_URL`），均关联 `agy-resets-balance`。
+3. 在 iOS 主屏幕添加 **Egern** 小组件并选择对应名称。
 
 ## 免责声明
 

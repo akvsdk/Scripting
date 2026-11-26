@@ -28,6 +28,8 @@ const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const TOKEN_CACHE_KEY = 'agy_widget_oauth_cache_v1';
 const PROJECT_CACHE_KEY = 'agy_widget_project_v1';
 const SNAPSHOT_CACHE_KEY = 'agy_widget_snapshot_v2';
+const RESETS_CACHE_KEY = 'agy_widget_resets_v1';
+const BALANCE_CACHE_KEY = 'agy_widget_balance_v1';
 
 const DEFAULT_REFRESH_MINUTES = 15;
 const REQUEST_TIMEOUT_MS = 10000;
@@ -100,8 +102,8 @@ function todayPacificDate(now = new Date()) {
 }
 
 function formatRelativeTime(value, now = Date.now()) {
-  const ts = Date.parse(value);
-  if (Number.isNaN(ts)) return '--';
+  const ts = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(ts)) return '--';
   const deltaSec = Math.round((ts - now) / 1000);
   const abs = Math.abs(deltaSec);
   if (abs < 45) return '刚刚';
@@ -662,6 +664,8 @@ function normalizeBalancePayload(payload, tierInfo = null) {
     plan: plan ? String(plan) : null,
     balanceText,
     quotas,
+    email: src.email || (primaryGroup && primaryGroup.accountEmail) || null,
+    model: src.model || (primaryGroup && primaryGroup.subtitle) || null,
     updatedAt: (primaryGroup && primaryGroup.updatedAt) || src.updatedAt || null,
   };
 }
@@ -842,6 +846,84 @@ function buildCardItems(dashboard, balance, balanceError) {
   return [latestResetCard, resetTotalCard, avgIntervalCard, longestCard];
 }
 
+function buildBalanceOnlyCards(balance) {
+  const cards = [];
+  const lowestQ = pickLowestQuota(balance.quotas);
+  if (balance.balanceText) {
+    cards.push({
+      label: '账户余额',
+      val: balance.balanceText,
+      sub: balance.plan || '可用额度',
+      subColor: C.gold,
+      color: C.gold,
+      hex: HEX.gold,
+      graphic: lowestQ ? { kind: 'gauge', fraction: lowestQ.remainingFraction } : null,
+    });
+  }
+  const maxQuotaCards = balance.balanceText ? 3 : 4;
+  for (const q of balance.quotas.slice(0, maxQuotaCards)) {
+    const tone = quotaTone(q.remainingFraction);
+    cards.push({
+      label: q.label,
+      val: `${Math.round(q.remainingFraction * 100)}%`,
+      sub: formatResetSub(q),
+      subColor: tone.color,
+      color: tone.color,
+      hex: tone.hex,
+      graphic: { kind: 'gauge', fraction: q.remainingFraction },
+    });
+  }
+
+  const syncDate = balance.updatedAt ? new Date(balance.updatedAt) : null;
+  const syncShort = syncDate && !Number.isNaN(syncDate.getTime()) ? formatStamp(syncDate) : '--';
+  const syncRel = balance.updatedAt ? formatRelativeTime(balance.updatedAt) : '--';
+
+  const fillers = [
+    {
+      label: '订阅方案',
+      val: balance.plan || 'AGY',
+      sub: balance.email ? balance.email.slice(0, 14) : '当前账号',
+      subColor: C.blue,
+      color: C.blue,
+      hex: HEX.blue,
+      graphic: null,
+    },
+    {
+      label: '数据同步',
+      val: syncRel,
+      sub: syncShort,
+      subColor: C.teal,
+      color: C.teal,
+      hex: HEX.teal,
+      graphic: null,
+    },
+    {
+      label: '当前模型',
+      val: balance.model ? String(balance.model).slice(0, 10) : 'AGY',
+      sub: '最近活跃',
+      subColor: C.muted,
+      color: C.gold,
+      hex: HEX.gold,
+      graphic: null,
+    },
+    {
+      label: '最低余量',
+      val: lowestQ ? `${Math.round(lowestQ.remainingFraction * 100)}%` : '--',
+      sub: lowestQ ? lowestQ.label : '配额正常',
+      subColor: lowestQ ? quotaTone(lowestQ.remainingFraction).color : C.muted,
+      color: lowestQ ? quotaTone(lowestQ.remainingFraction).color : C.teal,
+      hex: lowestQ ? quotaTone(lowestQ.remainingFraction).hex : HEX.teal,
+      graphic: lowestQ ? { kind: 'gauge', fraction: lowestQ.remainingFraction } : null,
+    },
+  ];
+
+  for (const filler of fillers) {
+    if (cards.length >= 4) break;
+    cards.push(filler);
+  }
+  return cards.slice(0, 4);
+}
+
 // ---------------------------------------------------------------------------
 // DSL primitives & 实时油价.js-style card/layout renderers
 // ---------------------------------------------------------------------------
@@ -921,8 +1003,22 @@ function buildInfoCard(item, config) {
   };
 }
 
-function renderLockScreen(family, { dashboard, balance, refreshAfter, widgetUrl }) {
-  const rel = formatRelativeTime(dashboard.latest.announced_at);
+function renderStatusWidget({ icon, iconColor, title, message, refreshAfter, widgetUrl }) {
+  return {
+    type: 'widget',
+    url: widgetUrl || WEBSITE_URL,
+    refreshAfter,
+    padding: 16,
+    backgroundColor: ROOT_BG,
+    children: [
+      mkRow([mkIcon(icon, iconColor, 16), mkSpacer(4), mkText(title, 15, 'heavy', C.main, { maxLines: 1, minScale: 0.75 })], 0),
+      mkSpacer(8),
+      mkText(message, 11, 'medium', C.muted, { maxLines: 3 }),
+    ],
+  };
+}
+
+function renderLockScreen(family, { mode, dashboard, balance, refreshAfter, widgetUrl }) {
   const targetUrl = widgetUrl || WEBSITE_URL;
   const topQ = pickLowestQuota(balance && balance.quotas);
   const quotaShort = topQ
@@ -931,6 +1027,52 @@ function renderLockScreen(family, { dashboard, balance, refreshAfter, widgetUrl 
       ? balance.balanceText
       : '';
 
+  if (mode === 'balance') {
+    const titleLabel = balance && balance.plan ? `AGY ${balance.plan}` : 'AGY 余额';
+    if (family === 'accessoryInline') {
+      const text = topQ
+        ? `AGY ${topQ.label} ${quotaShort}`
+        : balance && balance.balanceText
+          ? `AGY 余 ${balance.balanceText}`
+          : 'AGY 余额';
+      return {
+        type: 'widget',
+        url: targetUrl,
+        refreshAfter,
+        children: [mkText(text, 'body', 'semibold', C.main, { maxLines: 1 })],
+      };
+    }
+    if (family === 'accessoryCircular') {
+      return {
+        type: 'widget',
+        url: targetUrl,
+        refreshAfter,
+        padding: 4,
+        gap: 1,
+        children: [
+          mkText('AGY', 10, 'bold', C.muted, { textAlign: 'center', maxLines: 1 }),
+          mkText(quotaShort || '--', 14, 'heavy', C.main, { textAlign: 'center', maxLines: 1, minScale: 0.6 }),
+        ],
+      };
+    }
+    const rectSub = topQ
+      ? `${topQ.label} · ${formatResetSub(topQ)}`
+      : balance && balance.balanceText
+        ? `可用余额 ${balance.balanceText}`
+        : '配额正常';
+    return {
+      type: 'widget',
+      url: targetUrl,
+      refreshAfter,
+      gap: 2,
+      children: [
+        mkText(`${titleLabel}${quotaShort ? ` · ${quotaShort}` : ''}`, 'headline', 'bold', C.main, { maxLines: 1, minScale: 0.75 }),
+        mkText(rectSub, 'caption1', 'medium', C.muted, { maxLines: 1, minScale: 0.75 }),
+      ],
+    };
+  }
+
+  const rel = dashboard ? formatRelativeTime(dashboard.latest.announced_at) : '--';
   if (family === 'accessoryInline') {
     return {
       type: 'widget',
@@ -981,6 +1123,9 @@ export default async function (ctx) {
   const isLarge = family.includes('large');
   const isLock = family.startsWith('accessory');
 
+  const modeRaw = String(env.WIDGET_MODE || env.AGY_WIDGET_MODE || 'auto').trim().toLowerCase();
+  const mode = modeRaw === 'resets' || modeRaw === 'balance' ? modeRaw : 'auto';
+
   const refreshMinutes = Math.max(5, Number(env.REFRESH_MINUTES) || DEFAULT_REFRESH_MINUTES);
   const refreshAfter = new Date(Date.now() + refreshMinutes * 60 * 1000).toISOString();
   const updateTimeStr = formatStamp(new Date());
@@ -992,83 +1137,151 @@ export default async function (ctx) {
       (env.AGY_ACCESS_TOKEN || '').trim() ||
       (env.AGY_REFRESH_TOKEN || '').trim()
   );
-  const needHistory = isLarge;
-  const cached = readStorageJSON(ctx, SNAPSHOT_CACHE_KEY);
+
+  if (mode === 'balance' && !hasBalanceConfig) {
+    return renderStatusWidget({
+      icon: 'chart.bar.fill',
+      iconColor: C.accent,
+      title: 'AGY 余额',
+      message: '未配置配额接口：请在模块 Env 中填写 AGY_BALANCE_URL（支持 Quota Hub 地址）',
+      refreshAfter,
+      widgetUrl,
+    });
+  }
+
+  const needResets = mode !== 'balance';
+  const needBalance = mode === 'balance' || (mode === 'auto' && hasBalanceConfig);
+  const needHistory = needResets && isLarge;
+
+  const legacyCache = readStorageJSON(ctx, SNAPSHOT_CACHE_KEY);
+  const resetsCache = readStorageJSON(ctx, RESETS_CACHE_KEY) || (legacyCache && legacyCache.dashboard) || null;
+  const balanceCache = readStorageJSON(ctx, BALANCE_CACHE_KEY) || (legacyCache && legacyCache.balance) || null;
 
   const [resetsResult, balanceResult] = await Promise.allSettled([
-    fetchResetsDashboard(ctx, needHistory, endpointConfig && endpointConfig.resetsUrl),
-    hasBalanceConfig ? fetchBalanceSummary(ctx, env, endpointConfig) : Promise.resolve(null),
+    needResets ? fetchResetsDashboard(ctx, needHistory, endpointConfig && endpointConfig.resetsUrl) : Promise.resolve(null),
+    needBalance ? fetchBalanceSummary(ctx, env, endpointConfig) : Promise.resolve(null),
   ]);
 
   let dashboard = null;
-  if (resetsResult.status === 'fulfilled') {
-    dashboard = resetsResult.value;
-    if (!dashboard.history.length && cached && cached.dashboard && cached.dashboard.history) {
-      dashboard.history = cached.dashboard.history;
-      dashboard.intervals = cached.dashboard.intervals || [];
+  if (needResets) {
+    if (resetsResult.status === 'fulfilled' && resetsResult.value) {
+      dashboard = resetsResult.value;
+      if (!dashboard.history.length && resetsCache && resetsCache.history) {
+        dashboard.history = resetsCache.history;
+        dashboard.intervals = resetsCache.intervals || [];
+      }
+      writeStorageJSON(ctx, RESETS_CACHE_KEY, dashboard);
+    } else if (resetsCache) {
+      dashboard = resetsCache;
+    } else {
+      const errMsg = resetsResult.reason instanceof Error ? resetsResult.reason.message : String(resetsResult.reason);
+      return renderStatusWidget({
+        icon: 'arrow.clockwise.circle.fill',
+        iconColor: C.red,
+        title: 'AGY 重置加载失败',
+        message: errMsg,
+        refreshAfter,
+        widgetUrl,
+      });
     }
-  } else if (cached && cached.dashboard) {
-    dashboard = cached.dashboard;
-  } else {
-    const errMsg = resetsResult.reason instanceof Error ? resetsResult.reason.message : String(resetsResult.reason);
-    return {
-      type: 'widget',
-      url: widgetUrl,
-      refreshAfter,
-      padding: 16,
-      backgroundColor: ROOT_BG,
-      children: [
-        mkRow([mkIcon('arrow.clockwise.circle.fill', C.red, 16), mkSpacer(4), mkText('AGY 加载失败', 15, 'heavy', C.main)], 0),
-        mkSpacer(8),
-        mkText(errMsg, 11, 'medium', C.muted, { maxLines: 3 }),
-      ],
-    };
   }
 
   let balance = null;
   let balanceError = null;
-  if (hasBalanceConfig) {
-    if (balanceResult.status === 'fulfilled') {
+  if (needBalance) {
+    if (balanceResult.status === 'fulfilled' && balanceResult.value) {
       balance = balanceResult.value;
-    } else if (cached && cached.balance) {
-      balance = cached.balance;
+      writeStorageJSON(ctx, BALANCE_CACHE_KEY, balance);
+    } else if (balanceCache) {
+      balance = balanceCache;
     } else {
       balanceError = balanceResult.reason instanceof Error ? balanceResult.reason.message : String(balanceResult.reason);
+      if (mode === 'balance') {
+        return renderStatusWidget({
+          icon: 'chart.bar.fill',
+          iconColor: C.red,
+          title: 'AGY 余额加载失败',
+          message: balanceError,
+          refreshAfter,
+          widgetUrl,
+        });
+      }
     }
   }
 
-  writeStorageJSON(ctx, SNAPSHOT_CACHE_KEY, {
-    dashboard,
-    balance: balance || (cached && cached.balance) || null,
-    savedAt: Date.now(),
-  });
-
   if (isLock) {
-    return renderLockScreen(familyRaw, { dashboard, balance, refreshAfter, widgetUrl });
+    return renderLockScreen(familyRaw, { mode, dashboard, balance, refreshAfter, widgetUrl });
   }
 
-  const cards = buildCardItems(dashboard, balance, balanceError);
-  const resetAt = new Date(dashboard.latest.announced_at);
-  const resetDateStr = Number.isNaN(resetAt.getTime()) ? '--' : formatStamp(resetAt);
-  const resetRel = formatRelativeTime(dashboard.latest.announced_at);
-  const isUrgent = Boolean(dashboard.scheduledReset || dashboard.daysSinceLast >= dashboard.averageDays);
-  const infoColor = isUrgent ? C.red : C.gold;
+  const isBalanceOnly = mode === 'balance';
+  const cards = isBalanceOnly
+    ? buildBalanceOnlyCards(balance)
+    : buildCardItems(dashboard, mode === 'resets' ? null : balance, mode === 'resets' ? null : balanceError);
 
-  const widgetTitle = balance
+  const lowestQuota = pickLowestQuota(balance && balance.quotas);
+  const headerIcon = isBalanceOnly ? 'chart.bar.fill' : 'arrow.clockwise.circle.fill';
+  const widgetTitle = isBalanceOnly || (mode === 'auto' && balance)
     ? balance.plan && (!isSmall || balance.plan.length <= 6)
       ? `AGY ${balance.plan}`
       : balance.balanceText
         ? 'AGY 余额'
         : 'AGY 配额'
     : 'AGY 重置';
-  const footerLabel = balance ? '配额状态: ' : '重置节奏: ';
-  const lowestQuota = pickLowestQuota(balance && balance.quotas);
-  const footerInfo = lowestQuota
-    ? `${lowestQuota.label} ${Math.round(lowestQuota.remainingFraction * 100)}%`
-    : `均 ${dashboard.averageDays.toFixed(1)}天 · 最长 ${dashboard.longestDays.toFixed(0)}天`;
-  const footerColor = lowestQuota ? quotaTone(lowestQuota.remainingFraction).color : isUrgent ? C.red : C.teal;
 
-  // 小号 (Small): 2x2 四宫格，完全对齐 实时油价.js
+  let headerInfoLabel;
+  let headerInfoMain;
+  let headerInfoRel;
+  let infoColor;
+  let smallFooterIcon;
+  let smallFooterText;
+  let smallFooterColor;
+  let footerLabel;
+  let footerInfo;
+  let footerColor;
+
+  if (isBalanceOnly) {
+    const syncTs = typeof balance.updatedAt === 'number' ? balance.updatedAt : Date.parse(balance.updatedAt || '');
+    const hasSyncTs = Number.isFinite(syncTs);
+    const syncDateStr = hasSyncTs ? formatStamp(new Date(syncTs)) : updateTimeStr;
+    const syncRelStr = hasSyncTs ? formatRelativeTime(syncTs) : '刚刚';
+    const syncAgeMin = hasSyncTs ? (Date.now() - syncTs) / 60000 : 0;
+    infoColor = syncAgeMin > 360 ? C.red : syncAgeMin > 30 ? C.gold : C.teal;
+
+    headerInfoLabel = '快照: ';
+    headerInfoMain = syncDateStr;
+    headerInfoRel = ` (${syncRelStr})`;
+    smallFooterIcon = 'clock.fill';
+    smallFooterText = `快照: ${syncDateStr}`;
+    smallFooterColor = syncAgeMin > 360 ? C.red : C.muted;
+
+    footerLabel = '配额状态: ';
+    footerInfo = lowestQuota
+      ? `${lowestQuota.label} ${Math.round(lowestQuota.remainingFraction * 100)}%`
+      : balance.email || balance.plan || '配额正常';
+    footerColor = lowestQuota ? quotaTone(lowestQuota.remainingFraction).color : C.teal;
+  } else {
+    const resetAt = new Date(dashboard.latest.announced_at);
+    const resetDateStr = Number.isNaN(resetAt.getTime()) ? '--' : formatStamp(resetAt);
+    const resetRel = formatRelativeTime(dashboard.latest.announced_at);
+    const isUrgent = Boolean(dashboard.scheduledReset || dashboard.daysSinceLast >= dashboard.averageDays);
+    infoColor = isUrgent ? C.red : C.gold;
+
+    headerInfoLabel = '最近重置: ';
+    headerInfoMain = resetDateStr;
+    headerInfoRel = ` (${resetRel})`;
+    smallFooterIcon = 'clock.fill';
+    smallFooterText = `最近重置: ${resetDateStr}`;
+    smallFooterColor = isUrgent ? C.red : C.muted;
+
+    const showBalanceFooter = mode === 'auto' && balance && lowestQuota;
+    footerLabel = showBalanceFooter ? '配额状态: ' : '重置节奏: ';
+    footerInfo = showBalanceFooter
+      ? `${lowestQuota.label} ${Math.round(lowestQuota.remainingFraction * 100)}%`
+      : `均 ${dashboard.averageDays.toFixed(1)}天 · 最长 ${dashboard.longestDays.toFixed(0)}天`;
+    footerColor = showBalanceFooter ? quotaTone(lowestQuota.remainingFraction).color : isUrgent ? C.red : C.teal;
+  }
+
+  // 小号 (Small): 2x2 四宫格
   if (isSmall) {
     const cardCfg = {
       radius: 10,
@@ -1089,7 +1302,7 @@ export default async function (ctx) {
       children: [
         mkRow(
           [
-            mkIcon('arrow.clockwise.circle.fill', C.accent, 13),
+            mkIcon(headerIcon, C.accent, 13),
             mkSpacer(4),
             mkText(widgetTitle, 13, 'heavy', C.main, { maxLines: 1, minScale: 0.75 }),
             mkSpacer(),
@@ -1114,9 +1327,9 @@ export default async function (ctx) {
         mkRow(
           [
             mkSpacer(),
-            mkIcon('clock.fill', isUrgent ? C.red : C.muted, 9),
+            mkIcon(smallFooterIcon, smallFooterColor, 9),
             mkSpacer(3),
-            mkText(`最近重置: ${resetDateStr}`, 9, 'bold', isUrgent ? C.red : C.muted, { maxLines: 1 }),
+            mkText(smallFooterText, 9, 'bold', smallFooterColor, { maxLines: 1 }),
           ],
           0
         ),
@@ -1149,13 +1362,13 @@ export default async function (ctx) {
       children: [
         mkRow(
           [
-            mkIcon('arrow.clockwise.circle.fill', C.accent, 17),
+            mkIcon(headerIcon, C.accent, 17),
             mkSpacer(4),
             mkText(widgetTitle, 16, 'heavy', C.main, { maxLines: 1, minScale: 0.75 }),
             mkSpacer(),
-            mkText('最近重置: ', 12, 'medium', infoColor),
-            mkText(resetDateStr, 12, 'bold', infoColor),
-            mkText(` (${resetRel})`, 12, 'bold', infoColor),
+            mkText(headerInfoLabel, 12, 'medium', infoColor),
+            mkText(headerInfoMain, 12, 'bold', infoColor),
+            mkText(headerInfoRel, 12, 'bold', infoColor),
           ],
           0
         ),
@@ -1192,7 +1405,7 @@ export default async function (ctx) {
     };
   }
 
-  // 中号 (Medium): 1x4 横排卡片布局，对齐 实时油价.js
+  // 中号 (Medium): 1x4 横排卡片布局
   const cardCfgMed = {
     radius: 13,
     padding: [12, 6, 12, 6],
@@ -1212,13 +1425,13 @@ export default async function (ctx) {
     children: [
       mkRow(
         [
-          mkIcon('arrow.clockwise.circle.fill', C.accent, 16),
+          mkIcon(headerIcon, C.accent, 16),
           mkSpacer(2),
           mkText(widgetTitle, 15, 'heavy', C.main, { maxLines: 1, minScale: 0.75 }),
           mkSpacer(),
-          mkText('最近重置: ', 11, 'medium', infoColor),
-          mkText(resetDateStr, 11, 'bold', infoColor),
-          mkText(` (${resetRel})`, 11, 'bold', infoColor),
+          mkText(headerInfoLabel, 11, 'medium', infoColor),
+          mkText(headerInfoMain, 11, 'bold', infoColor),
+          mkText(headerInfoRel, 11, 'bold', infoColor),
         ],
         0
       ),

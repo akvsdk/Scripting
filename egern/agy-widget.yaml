@@ -41,5 +41,11 @@ scriptings:
       timeout: 20
 
 widgets:
-  - name: "AGY 重置与余额"
+  - name: "AGY 重置"
     script_name: "agy-resets-balance"
+    env:
+      WIDGET_MODE: "resets"
+  - name: "AGY 余额"
+    script_name: "agy-resets-balance"
+    env:
+      WIDGET_MODE: "balance"
