@@ -26,6 +26,12 @@ function jsonResponse(
   });
 }
 
+function isUnknownPlanTier(value?: string | null): boolean {
+  if (!value) return true;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === '' || trimmed === 'unknown';
+}
+
 // 公开只读代理 agyresets.com/api/v1（无个人凭据，边缘缓存 5 分钟，解决浏览器 CORS）
 async function fetchAgyResetsPublic(): Promise<unknown> {
   const statusRes = await fetch(`${AGY_RESETS_API}/status`, {
@@ -112,10 +118,28 @@ export default {
       if (!body || typeof body.quota !== 'object' || body.quota === null) {
         return jsonResponse({ error: 'Missing quota object' }, 400, cors);
       }
+      const incomingEmail = typeof body.email === 'string' ? body.email : null;
+      let resolvedPlanTier =
+        typeof body.planTier === 'string' && !isUnknownPlanTier(body.planTier)
+          ? body.planTier.trim()
+          : undefined;
+
+      // 冷启动或缺失订阅等级时，同账号保留 KV 中已有的有效 planTier，避免被 Unknown 覆盖
+      if (!resolvedPlanTier) {
+        const prev = await env.QUOTA_KV.get<AgySnapshot>(AGY_KV_KEY, 'json');
+        if (
+          prev?.planTier &&
+          !isUnknownPlanTier(prev.planTier) &&
+          (!incomingEmail || !prev.email || prev.email === incomingEmail)
+        ) {
+          resolvedPlanTier = prev.planTier;
+        }
+      }
+
       const sanitized: AgySnapshot = {
         updatedAt: typeof body.updatedAt === 'number' ? body.updatedAt : Date.now(),
-        email: typeof body.email === 'string' ? body.email : null,
-        planTier: typeof body.planTier === 'string' ? body.planTier : undefined,
+        email: incomingEmail,
+        planTier: resolvedPlanTier,
         model: typeof body.model === 'string' ? body.model : null,
         costUsd: typeof body.costUsd === 'number' ? body.costUsd : null,
         quota: body.quota,
